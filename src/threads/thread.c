@@ -25,6 +25,11 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* Lista de processos que estão no estado THREAD_BLOCKED, ou seja,
+   processos que não estão podendo prosseguir sua execução por estar
+   aguardando a ocorrencia de um evento externo. */
+static struct list sleep_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -37,6 +42,9 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+/* Variável que armazena o menor valor de ticks da lista de threads bloqueadas. */
+int64_t blocked_tick;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -89,9 +97,11 @@ void
 thread_init (void) 
 {
   ASSERT (intr_get_level () == INTR_OFF);
+  blocked_tick = INT64_MAX;
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleep_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -242,6 +252,20 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
+
+void thread_sleep(int64_t ticks){
+  enum intr_level old_level;
+
+  old_level = intr_disable();
+  struct thread* cur_thread = thread_current();
+  cur_thread->status = THREAD_BLOCKED;
+  cur_thread->wakeup_tick = ticks;
+
+  if(ticks < blocked_tick) blocked_tick = ticks;
+  
+  schedule();
+  intr_set_level (old_level);
+};
 
 /* Returns the name of the running thread. */
 const char *
