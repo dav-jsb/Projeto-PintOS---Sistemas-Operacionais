@@ -215,6 +215,16 @@ thread_create (const char *name, int priority,
   return tid;
 }
 
+bool thread_sort_wakeup_tick (const struct list_elem* elem1,
+                         const struct list_elem* elem2,
+                         void *aux UNUSED)
+{
+  const struct thread* thread1 = list_entry(elem1, struct thread, elem);
+  const struct thread* thread2 = list_entry(elem2, struct thread, elem);
+
+  return thread1->wakeup_tick < thread2->wakeup_tick;
+}
+
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
@@ -255,17 +265,43 @@ thread_unblock (struct thread *t)
 
 void thread_sleep(int64_t ticks){
   enum intr_level old_level;
+  struct thread* cur_thread = thread_current();
 
   old_level = intr_disable();
-  struct thread* cur_thread = thread_current();
-  cur_thread->status = THREAD_BLOCKED;
   cur_thread->wakeup_tick = ticks;
 
+  list_insert_ordered(&sleep_list, &cur_thread->elem, thread_sort_wakeup_tick, NULL);
+
   if(ticks < blocked_tick) blocked_tick = ticks;
+
+  thread_block();
   
-  schedule();
   intr_set_level (old_level);
 };
+
+void thread_wakeup(int64_t ticks){
+  if (ticks < blocked_tick) return;
+
+  enum intr_level old_level = intr_disable();
+  struct list_elem* element = list_begin(&sleep_list);
+
+  blocked_tick = INT64_MAX;
+
+  while (element != list_end(&sleep_list)){
+    struct thread* cur_thread = list_entry(element, struct thread, elem);
+    
+    if (ticks < cur_thread->wakeup_tick){
+      blocked_tick = cur_thread->wakeup_tick;
+      break;
+    }
+
+    element = list_remove(element);
+
+    thread_unblock(cur_thread);
+  }
+
+  intr_set_level(old_level);
+}
 
 /* Returns the name of the running thread. */
 const char *
