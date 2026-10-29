@@ -482,28 +482,6 @@ thread_set_priority (int new_priority)
   thread_yield();
 }
 
-void thread_set_nice(int new_nice){
-  enum intr_level old_level = intr_disable();
-  struct thread* cur_thread = thread_current();
-  cur_thread->nice = new_nice;
-
-  mlfqs_calc_priority (cur_thread, NULL);
-  thread_yield();
-  intr_set_level(old_level);
-}
-
-int thread_get_nice (void){
-  return thread_current()->nice;
-}
-
-int thread_get_load_avg (void){
-  return fp_to_int_round (fp_mul_mixed (load_avg, 100));
-}
-
-int thread_get_recent_cpu (void){
-  return fp_to_int_round (fp_mul_mixed(thread_current()->recent_cpu, 100));
-}
-
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
@@ -515,31 +493,34 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  enum intr_level old_level = intr_disable();
+  struct thread* cur_thread = thread_current();
+  cur_thread->nice = nice;
+
+  mlfqs_calc_priority (cur_thread, NULL);
+  thread_yield();
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_to_int_round (fp_mul_mixed (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_to_int_round (fp_mul_mixed(thread_current()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
