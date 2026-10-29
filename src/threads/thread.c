@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "devices/timer.h"
+#include "threads/fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -83,6 +84,13 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool thread_sort_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+static bool thread_sort_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+static void mlfqs_calc_priority (struct thread* cur_thread, void *aux UNUSED);
+static void mlfqs_calc_load_avg (void);
+static void mlfqs_calc_recent_cpu (struct thread* cur_thread, void *aux UNUSED);
+static void mlfqs_increment_recent_cpu (void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -135,7 +143,7 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
-void mlfqs_calc_priority (struct thread* cur_thread){
+void mlfqs_calc_priority (struct thread* cur_thread, void* aux UNUSED){
   if (cur_thread == idle_thread) return;
 
   int term_cpu = fp_to_int (fp_div_mixed (cur_thread->recent_cpu, 4));
@@ -160,7 +168,7 @@ void mlfqs_calc_load_avg (void){
   load_avg = fp_add (term1, term2);
 }
 
-void mlfqs_calc_recent_cpu (struct thread* cur_thread){
+void mlfqs_calc_recent_cpu (struct thread* cur_thread, void* aux UNUSED){
   if (cur_thread == idle_thread) return;
 
   int double_load = fp_mul_mixed (load_avg, 2);
@@ -479,7 +487,7 @@ void thread_set_nice(int new_nice){
   struct thread* cur_thread = thread_current();
   cur_thread->nice = new_nice;
 
-  mlfqs_calc_priority (cur_thread);
+  mlfqs_calc_priority (cur_thread, NULL);
   thread_yield();
   intr_set_level(old_level);
 }
