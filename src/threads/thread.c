@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -45,6 +46,9 @@ static struct lock tid_lock;
 
 /* Variável que armazena o menor valor de ticks da lista de threads bloqueadas. */
 int64_t blocked_tick;
+
+/* Variável global que armazena a carga média do sistema em ponto fixo. */
+static int load_avg;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -109,6 +113,9 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  /* Setando a carga média inicial para 0. */
+  load_avg = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -128,6 +135,45 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+void mlfqs_calc_priority (struct thread* cur_thread){
+  if (cur_thread == idle_thread) return;
+
+  int term_cpu = fp_to_int (fp_div_mixed (cur_thread->recent_cpu, 4));
+  int new_prio = PRI_MAX - term_cpu - (cur_thread->nice * 2);
+
+  if (new_prio < PRI_MIN) new_prio = PRI_MIN;
+  if (new_prio > PRI_MAX) new_prio = PRI_MAX;
+
+  cur_thread->priority = new_prio;
+}
+
+void mlfqs_calc_load_avg (void){
+  int ready_threads = list_size(&ready_list);
+  if (thread_current() != idle_thread) ready_threads++;
+
+  int coef1 = fp_div_mixed (int_to_fp (59), 60);
+  int coef2 = fp_div_mixed (int_to_fp (1), 60);
+
+  int term1 = fp_mul (coef1, load_avg);
+  int term2 = fp_mul_mixed (coef2, ready_threads);
+
+  load_avg = fp_add (term1, term2);
+}
+
+void mlfqs_calc_recent_cpu (struct thread* cur_thread){
+  if (cur_thread == idle_thread) return;
+
+  int double_load = fp_mul_mixed (load_avg, 2);
+  int coef = fp_div (double_load, fp_add_mixed (double_load, 1));
+
+  cur_thread->recent_cpu = fp_add_mixed (fp_mul (coef, cur_thread->recent_cpu), cur_thread->nice);
+}
+
+void mlfqs_increment_recent_cpu (void){
+  struct thread* cur_thread = thread_current();
+  if (cur_thread != idle_thread) cur_thread->recent_cpu = fp_add_mixed (cur_thread->recent_cpu, 1);
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
@@ -144,6 +190,22 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  if (thread_mlfqs){
+    mlfqs_increment_recent_cpu();
+
+    int64_t ticks = timer_ticks();
+
+    if (ticks % TIMER_FREQ == 0){
+      mlfqs_calc_load_avg ();
+      thread_foreach(mlfqs_calc_recent_cpu, NULL);
+    }
+
+    if (ticks % 4 == 0){
+      thread_foreach(mlfqs_calc_priority, NULL);
+      list_sort (&ready_list, thread_sort_priority, NULL);
+    }
+  }
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -406,7 +468,32 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if (thread_mlfqs) return;
+
   thread_current ()->priority = new_priority;
+  thread_yield();
+}
+
+void thread_set_nice(int new_nice){
+  enum intr_level old_level = intr_disable();
+  struct thread* cur_thread = thread_current();
+  cur_thread->nice = new_nice;
+
+  mlfqs_calc_priority (cur_thread);
+  thread_yield();
+  intr_set_level(old_level);
+}
+
+int thread_get_nice (void){
+  return thread_current()->nice;
+}
+
+int thread_get_load_avg (void){
+  return fp_to_int_round (fp_mul_mixed (load_avg, 100));
+}
+
+int thread_get_recent_cpu (void){
+  return fp_to_int_round (fp_mul_mixed(thread_current()->recent_cpu, 100));
 }
 
 /* Returns the current thread's priority. */
@@ -534,6 +621,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->nice = 0;
+  t->recent_cpu = 0;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

@@ -90,7 +90,8 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
     int64_t wakeup_tick;                /* Tempo em ticks local da thread. */
-
+    int nice;                           /* Valor de gentileza (-20 a 20) */
+    int recent_cpu;                     /* Uso recente da CPU em ponto fixo */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
