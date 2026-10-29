@@ -225,6 +225,16 @@ bool thread_sort_wakeup_tick (const struct list_elem* elem1,
   return thread1->wakeup_tick < thread2->wakeup_tick;
 }
 
+bool thread_sort_priority (const struct list_elem* elem1,
+                           const struct list_elem* elem2,
+                           void* aux UNUSED)
+{
+  const struct thread* thread1 = list_entry(elem1, struct thread, elem);
+  const struct thread* thread2 = list_entry(elem2, struct thread, elem);
+
+  return thread1->priority > thread2->priority;
+}
+
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
@@ -258,7 +268,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, thread_sort_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -369,7 +379,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, thread_sort_priority, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
