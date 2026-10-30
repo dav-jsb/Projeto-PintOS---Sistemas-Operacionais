@@ -11,6 +11,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed-point.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -45,6 +47,9 @@ static struct lock tid_lock;
 
 /* Variável que armazena o menor valor de ticks da lista de threads bloqueadas. */
 int64_t blocked_tick;
+
+/* Carga média do sistema (ponto fixo)*/
+static int load_avg;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -104,11 +109,17 @@ thread_init (void)
   list_init (&sleep_list);
   list_init (&all_list);
 
+  /* Definir a carga média inicialmente como 0. */
+  load_avg = 0;
+
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  /* Setar o nice e o recent_cpu inicialmente para 0. */
+  initial_thread->nice = 0;
+  initial_thread->recent_cpu = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -148,6 +159,31 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+
+  if (thread_mlfqs){
+    thread_mlfqs_increment_recent_cpu();
+    int64_t ticks = timer_ticks();
+
+    if (ticks % TIMER_FREQ == 0){
+      thread_mlfqs_change_load_avg();
+
+      struct list_elem* e = list_begin(&all_list);
+      while(e != list_end(&all_list)){
+        thread_mlfqs_change_recent_cpu(list_entry(e, struct thread, allelem));
+        e = list_next(e);
+      }
+    }
+
+    if (ticks % 4 == 0){
+      struct list_elem* e = list_begin(&all_list);
+      while(e != list_end(&all_list)){
+        thread_mlfqs_change_priority(list_entry(e, struct thread, allelem));
+        e = list_next(e);
+      }
+
+      list_sort(&ready_list, thread_sort_priority, NULL);
+    }
+  }
 }
 
 /* Prints thread statistics. */
@@ -534,10 +570,48 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->nice =  thread_current()->nice;
+  t->recent_cpu = thread_current()->recent_cpu;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+}
+
+void thread_mlfqs_change_priority(struct thread* t){
+  if (t == idle_thread) return;
+
+  int term1 = FIXED_TO_INT_BOUND(DIV_INT(t->recent_cpu, 4));
+  int new_priority = PRI_MAX - term1 - (t->nice * 2);
+
+  if (new_priority > PRI_MAX) new_priority = PRI_MAX;
+  if (new_priority < PRI_MIN) new_priority = PRI_MIN;
+
+  t->priority = new_priority;
+}
+
+void thread_mlfqs_change_recent_cpu(struct thread* t){
+  if (t == idle_thread) return;
+
+  int two_load = MULT_INT(load_avg, 2);
+  int coef = DIV_FIXED(two_load, ADD_INT(two_load, 1));
+  t->recent_cpu = ADD_INT(MULT_FIXED(coef, t->recent_cpu), t->nice);
+}
+
+void thread_mlfqs_change_load_avg(void){
+  int ready_threads = list_size(&ready_list);
+  if (thread_current() != idle_thread) ready_threads++;
+
+  int term1 = MULT_FIXED(DIV_INT(INT_TO_FIXED(59), 60), load_avg);
+  int term2 = MULT_INT(DIV_INT(INT_TO_FIXED(1), 60), ready_threads);
+
+  load_avg = ADD_FIXED(term1, term2);
+}
+
+void thread_mlfqs_increment_recent_cpu(void){
+  struct thread* cur = thread_current();
+  if (cur != idle_thread)
+    cur->recent_cpu = ADD_INT(cur->recent_cpu, 1);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
