@@ -91,6 +91,7 @@ static void mlfqs_calc_priority (struct thread* cur_thread, void *aux UNUSED);
 static void mlfqs_calc_load_avg (void);
 static void mlfqs_calc_recent_cpu (struct thread* cur_thread, void *aux UNUSED);
 static void mlfqs_increment_recent_cpu (void);
+void thread_test_preempt(void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -378,6 +379,18 @@ void thread_wakeup(int64_t ticks){
     element = list_remove(element);
 
     thread_unblock(cur_thread);
+  }
+
+  intr_set_level(old_level);
+}
+
+void thread_test_preempt(void){
+  if (intr_context()) return;
+
+  enum intr_level old_level = intr_disable();
+  if (!list_empty(&ready_list)){
+    struct thread* top = list_entry(list_begin(&ready_list), struct thread, elem);
+    if (top->priority > thread_current()->priority) thread_yield();
   }
 
   intr_set_level(old_level);
