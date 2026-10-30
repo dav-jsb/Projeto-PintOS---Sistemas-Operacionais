@@ -117,6 +117,7 @@ sema_up (struct semaphore *sema)
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
   sema->value++;
+  /* Verificamos se a thread acordada tem a prioridade maior que a atual. */
   thread_test_preempt();
   intr_set_level (old_level);
 }

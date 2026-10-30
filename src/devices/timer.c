@@ -92,8 +92,8 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  //while (timer_elapsed (start) < ticks) 
-  //  thread_yield ();
+
+  /* Passamos para o thread_sleep o instante de chamada da função somado com a quantidade de tempo que a thread precisa dormir. */
   if(timer_elapsed (start) < ticks)
       thread_sleep(start + ticks);
 }
@@ -175,6 +175,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
 
+  /* A cada interrupção de relógio, é chamada a função para acordar as threads bloqueadas. */
   thread_wakeup(ticks);
 }
 

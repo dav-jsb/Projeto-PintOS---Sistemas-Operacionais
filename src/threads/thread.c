@@ -114,7 +114,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
-  list_init (&sleep_list);
+  list_init (&sleep_list); /* Já inicializamos a sleep_list no boot. */
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -144,40 +144,48 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+/* Função para calcular a prioridade de uma thread. */
 void mlfqs_calc_priority (struct thread* cur_thread, void* aux UNUSED){
   if (cur_thread == idle_thread) return;
 
+  /* Cálculo da prioridade. */
   int term_cpu = fp_to_int (fp_div_mixed (cur_thread->recent_cpu, 4));
   int new_prio = PRI_MAX - term_cpu - (cur_thread->nice * 2);
 
+  /* A prioridade deve ficar entre a prioridade máxima e mínima. */
   if (new_prio < PRI_MIN) new_prio = PRI_MIN;
   if (new_prio > PRI_MAX) new_prio = PRI_MAX;
 
   cur_thread->priority = new_prio;
 }
 
+/* Função para calcular a carga média no sistema. */
 void mlfqs_calc_load_avg (void){
   int ready_threads = list_size(&ready_list);
   if (thread_current() != idle_thread) ready_threads++;
 
+  /* Cálculo da carga média. */
   int coef1 = fp_div_mixed (int_to_fp (59), 60);
   int coef2 = fp_div_mixed (int_to_fp (1), 60);
-
   int term1 = fp_mul (coef1, load_avg);
   int term2 = fp_mul_mixed (coef2, ready_threads);
 
+  /* Passamos o valor para a variável global de carga média. */
   load_avg = fp_add (term1, term2);
 }
 
+/* Função para calcular o uso recente da CPU. */
 void mlfqs_calc_recent_cpu (struct thread* cur_thread, void* aux UNUSED){
   if (cur_thread == idle_thread) return;
 
+  /* Cálculo do valor do uso recente. */
   int double_load = fp_mul_mixed (load_avg, 2);
   int coef = fp_div (double_load, fp_add_mixed (double_load, 1));
 
   cur_thread->recent_cpu = fp_add_mixed (fp_mul (coef, cur_thread->recent_cpu), cur_thread->nice);
 }
 
+/* Função de incremento para o uso recente de CPU. */
 void mlfqs_increment_recent_cpu (void){
   struct thread* cur_thread = thread_current();
   if (cur_thread != idle_thread) cur_thread->recent_cpu = fp_add_mixed (cur_thread->recent_cpu, 1);
@@ -200,7 +208,9 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  /* Em caso de uso do mlfqs. */
   if (thread_mlfqs){
+    /* Incremento do uso da CPU. */
     mlfqs_increment_recent_cpu();
 
     int64_t ticks = timer_ticks();
@@ -286,6 +296,7 @@ thread_create (const char *name, int priority,
   return tid;
 }
 
+/* Função para ser utilizada na inserção ordenada (verifica se um elemento é menor que o outro). */
 bool thread_sort_wakeup_tick (const struct list_elem* elem1,
                          const struct list_elem* elem2,
                          void *aux UNUSED)
@@ -348,11 +359,16 @@ void thread_sleep(int64_t ticks){
   enum intr_level old_level;
   struct thread* cur_thread = thread_current();
 
+  /* Desabilitamos as interrupções. */
   old_level = intr_disable();
+  /* Substituímos o valor do wakeup_tick pelo valor da entrada da função. */
   cur_thread->wakeup_tick = ticks;
 
+  /* Fazemos uma inserção ordenada da thread que vai passar a dormir na lista de threads bloqueadas. */
   list_insert_ordered(&sleep_list, &cur_thread->elem, thread_sort_wakeup_tick, NULL);
 
+  /* Caso o valor definido para a thread acordar seja menor que o da variável global da lista de bloqueadas.
+     A variável global passa a ser esse novo menor valor. */
   if(ticks < blocked_tick) blocked_tick = ticks;
 
   thread_block();
@@ -368,6 +384,7 @@ void thread_wakeup(int64_t ticks){
 
   blocked_tick = INT64_MAX;
 
+  /* Vai acordando todas as threads com wakeup_time menor que o instante do sistema. */
   while (element != list_end(&sleep_list)){
     struct thread* cur_thread = list_entry(element, struct thread, elem);
     
@@ -384,6 +401,7 @@ void thread_wakeup(int64_t ticks){
   intr_set_level(old_level);
 }
 
+/* Verifica se a thread em execução perdeu o topo da prioridade e força preempção. */
 void thread_test_preempt(void){
   if (intr_context()) return;
 
@@ -510,6 +528,7 @@ thread_set_nice (int nice UNUSED)
   struct thread* cur_thread = thread_current();
   cur_thread->nice = nice;
 
+  /* Calculamos a prioridade após a alteração do nice. */
   mlfqs_calc_priority (cur_thread, NULL);
   thread_yield();
   intr_set_level(old_level);
